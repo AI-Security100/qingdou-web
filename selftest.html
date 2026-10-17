@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mia 前端联调自检</title>
+<style>
+ body{margin:0;padding:18px;font:14px/1.6 -apple-system,"Microsoft YaHei",sans-serif;background:#0b1220;color:#cbd5e1}
+ h1{font-size:16px;margin:0 0 10px;color:#f1f5f9}
+ pre{background:#111c2e;border:1px solid #24344d;border-radius:10px;padding:12px;
+     white-space:pre-wrap;word-break:break-word;font-size:13px;color:#93c5fd}
+ b{color:#fbbf24}
+</style>
+</head>
+<body>
+<h1>Mia 前端联调自检（在 szhhb.cloud 源上直接调 API）</h1>
+<pre id="out">运行中…</pre>
+<script>
+const API = 'https://qindou-mia-api-v2.netlify.app/api/mia';
+const ASR = 'https://qindou-mia-api-v2.netlify.app/api/asr';
+const out = document.getElementById('out');
+const log = s => { out.textContent += '\n' + s; };
+
+(async () => {
+  out.textContent = 'origin = ' + location.origin;
+  // 1. 健康检查（GET，无预检）
+  try {
+    const r = await fetch(API);
+    log('GET /api/mia -> ' + r.status + ' ' + (await r.text()).slice(0, 120));
+  } catch (e) { log('GET 失败: ' + e); }
+
+  // 2. POST（会触发 CORS 预检，这是关键一环）
+  const t0 = Date.now();
+  try {
+    const r = await fetch(API, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        messages: [{role:'student', text:'Hi Mia! My name is Alan. Why do I need to sleep early?'}],
+        task: 'daily routine 日常作息'
+      })
+    });
+    const txt = await r.text();
+    log('POST /api/mia -> ' + r.status + '  用时 ' + (Date.now()-t0) + 'ms');
+    let d = null; try { d = JSON.parse(txt); } catch(e) {}
+    if (d && d.reply) {
+      log('★ 回复：' + d.reply);
+      log('★ tokens：' + JSON.stringify(d.usage));
+      document.title = 'OK|' + d.reply.slice(0, 40);
+    } else {
+      log('返回体：' + txt.slice(0, 300));
+      document.title = 'FAIL|' + r.status;
+    }
+  } catch (e) {
+    log('POST 失败（多半是 CORS）: ' + e);
+    document.title = 'ERR|' + e;
+  }
+
+  // 3. ASR 状态
+  try {
+    const r = await fetch(ASR);
+    log('GET /api/asr -> ' + r.status + ' ' + (await r.text()).slice(0, 120));
+  } catch (e) { log('ASR 检查失败: ' + e); }
+})();
+</script>
+</body>
+</html>
