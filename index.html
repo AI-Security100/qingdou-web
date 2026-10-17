@@ -646,11 +646,14 @@ function miaPatchMic(){
   (rows || box).appendChild(btn);
 }
 
+const _miaV1Render = render;   /* v1 的 render（内含 miaPatchUI） */
 render = function(){
-  const r = _miaOrig.render.apply(null, arguments);
+  const r = _miaV1Render.apply(null, arguments);
   try{ miaPatchMic(); }catch(e){}
   return r;
 };
+miaPatchUI();
+miaPatchMic();
 
 if(!document.getElementById('miaMicStyle')){
   const st = document.createElement('style');
