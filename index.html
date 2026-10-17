@@ -64,7 +64,7 @@ function enter(){if(!state.invited){tell('请先生成体验邀请。');return f
 function consent(value,source='manual'){if(state.practice.started&&!value){tell('练习已经产生本机记录；可用重置清除本次体验。');return false}state.practiceConsent=!!value;state.practiceConsentSource=value?source:'';if(value){state.practiceConsentAt=new Date().toISOString();event('practice_consent','F-001',source==='scripted'?'流程中的独立模拟授权':'家长单独勾选的体验授权')}commit();return true}
 function hasFamilyAccess(){return state.entered||state.personal.diagnosisImported}
 function startPractice(){if(!hasFamilyAccess()){tell('请先模拟家庭打开体验邀请。');return false}if(!state.practiceConsent){tell('请先勾选本次练习的家长授权。');return false}if(!state.practice.started){state.practice.started=true;state.practice.messages=[{role:'mia',text:'Hi! I’m Mia. Let’s talk about daily routines.\n'+prompts[0].ask+'\n'+prompts[0].hint}];event('practice_start')}if(state.personal.pendingMia){state.personal.linkedPractice=true;state.personal.pendingMia=false;event('plan_mia_link','PLAN-'+(state.personal.plan?.version||1),'仅衔接第三人称作息这一项已实现练习')}state.tab='teacher';commit();$('#main').focus({preventScroll:true});window.scrollTo({top:0,behavior:'instant'});return true}
-function submitAnswer(raw){if(!state.practice.started||!state.practiceConsent){tell('请学习授权待家长确认并开始练习。');return{kind:'blocked'}}const result=analyze(raw);if(state.practice.completed&&result.kind!=='classroom'){tell('本次3轮练习已完成，请提交教师复核。');return{kind:'completed'}}if(result.kind==='empty'){tell(result.feedback);return result}const text=String(raw).trim().slice(0,250);state.practice.draft='';state.practice.messages.push({role:'user',text});if(result.kind==='classroom'){state.practice.interactions=state.practice.interactions||[];state.practice.interactions.push({type:result.subtype,text,at:new Date().toISOString()});state.practice.messages.push({role:'mia',text:result.feedback});commit();requestAnimationFrame(()=>{const c=$('#chatlog');if(c)c.scrollTop=c.scrollHeight;$('#answerInput')?.focus()});return result}state.practice.attempts.push({round:state.practice.round+1,text,kind:result.kind,corrected:result.corrected||null,at:new Date().toISOString()});if(result.kind==='correct'){state.practice.passed.push(state.practice.round);state.practice.round++;if(state.practice.round>=3){state.practice.completed=true;event('practice_complete');state.practice.messages.push({role:'mia',kind:'correct',text:'你已完成本次3轮目标结构练习。这里没有生成发音分数，也不代表能力等级提升。\n下一步：请真人教师复核本次文本练习记录。'})}else{const p=prompts[state.practice.round];state.practice.messages.push({role:'mia',kind:'correct',text:result.feedback+'\n\n'+p.ask+'\n'+p.hint})}}else{state.practice.messages.push({role:'mia',kind:result.kind,text:result.feedback})}commit();requestAnimationFrame(()=>{const c=$('#chatlog');if(c)c.scrollTop=c.scrollHeight;$('#answerInput')?.focus()});return result}
+function submitAnswer(raw){if(!state.practice.started||!state.practiceConsent){tell('请学习授权待家长确认并开始练习。');return{kind:'blocked'}}const result=analyze(raw);if(state.practice.completed&&result.kind!=='classroom'){tell('本次 3 轮已完成，可继续自由对话或提交教师复核。');return{kind:'completed'}}if(result.kind==='empty'){tell(result.feedback);return result}const text=String(raw).trim().slice(0,250);state.practice.draft='';state.practice.messages.push({role:'user',text});if(result.kind==='classroom'){state.practice.interactions=state.practice.interactions||[];state.practice.interactions.push({type:result.subtype,text,at:new Date().toISOString()});state.practice.messages.push({role:'mia',text:result.feedback});commit();requestAnimationFrame(()=>{const c=$('#chatlog');if(c)c.scrollTop=c.scrollHeight;$('#answerInput')?.focus()});return result}state.practice.attempts.push({round:state.practice.round+1,text,kind:result.kind,corrected:result.corrected||null,at:new Date().toISOString()});if(result.kind==='correct'){state.practice.passed.push(state.practice.round);state.practice.round++;if(state.practice.round>=3){state.practice.completed=true;event('practice_complete');state.practice.messages.push({role:'mia',kind:'correct',text:'你已完成本次3轮目标结构练习。这里没有生成发音分数，也不代表能力等级提升。\n下一步：请真人教师复核本次文本练习记录。'})}else{const p=prompts[state.practice.round];state.practice.messages.push({role:'mia',kind:'correct',text:result.feedback+'\n\n'+p.ask+'\n'+p.hint})}}else{state.practice.messages.push({role:'mia',kind:result.kind,text:result.feedback})}commit();requestAnimationFrame(()=>{const c=$('#chatlog');if(c)c.scrollTop=c.scrollHeight;$('#answerInput')?.focus()});return result}
 function requestReview(){if(!state.practice.completed){tell('请先完成3轮目标结构练习。');return false}if(state.review.status==='passed'){navigate('archive');return true}state.review={status:'pending',grammar:false,context:false};event('review_request');state.tab='archive';commit();return true}
 function approveReview(){if(state.review.status!=='pending'){tell('请先提交教师复核。');return false}if(!state.review.grammar||!state.review.context){tell('教师需要核对语法结构与练习语境两项。');return false}state.review.status='passed';state.review.at=new Date().toISOString();event('review_pass');commit();tell('教师已复核本次文本记录；成长卡现在可显示“经复核”。');return true}
 function returnReview(){if(state.review.status!=='pending')return false;state.review={status:'returned',grammar:false,context:false};state.practice.completed=false;state.practice.round=2;state.practice.passed=state.practice.passed.filter(n=>n<2);state.practice.messages.push({role:'mia',text:'教师建议再补一句日常习惯句。请用 He 或 She 描述一个完整动作。'});event('review_return');state.share={consent:false,consentSource:'',generated:false,opened:false,lead:false};state.tab='teacher';commit();$('#main').focus({preventScroll:true});window.scrollTo({top:0,behavior:'instant'});return true}
@@ -116,7 +116,7 @@ function routeToMia(){const p=state.personal.plan;if(!p||p.status!=='confirmed'|
 function evidenceCards(stage=false){if(!stage)return `<div class="evidence-grid"><div class="evidence-tile"><b>口语表达</b><span class="chip amber">提示后完成（模拟）</span><p>固定入学样例任务：描述一个人物的日常作息。借助句子骨架完成，尚需换情境复查。</p></div><div class="evidence-tile"><b>语法运用</b><span class="chip amber">待教师复核（模拟）</span><p>固定入学样例任务：将第三人称单数用于完整句子。与正式MG级别或考试等级分开。</p></div><div class="evidence-tile"><b>听力理解</b><span class="chip amber">独立完成（模拟）</span><p>固定入学样例任务：听懂两步日常指令并回应。单次任务不能推导长期听力等级。</p></div></div>`;const q=state.personal.plan?.preferences||state.personal.preferences;const goal=goalOptions[q.need].find(g=>g[0]===q.goal)?.[1]||'当前目标任务';const tasks={speaking:q.need==='speaking'?goal:q.need==='listening'?'对所听材料回应或复述一个关键信息':'用当前目标结构描述熟悉情境',grammar:q.need==='grammar'?goal:q.goal==='daily_routine'?'在人物作息句中使用第三人称单数':'用完整句回应当前任务，结构由教师核对',listening:q.need==='listening'?goal:q.goal==='dialogue'?'听懂搭档的一问并作相关回应':'听目标情境示例，指出人物与行动'};const active=new Set([q.need,...q.cross]);const outcomes={speaking:'独立完成（模拟）',grammar:'提示后完成（模拟）',listening:'待进一步复核（模拟）'};return `<div class="evidence-grid">${Object.entries(needNames).filter(([key])=>key!=='writing').map(([key,name])=>`<div class="evidence-tile"><b>${name}</b><span class="chip amber">${active.has(key)?outcomes[key]:'本阶段未观察（模拟）'}</span><p>任务：${esc(tasks[key])}。${active.has(key)?'这是当前组合V'+state.personal.plan.version+'的示例复核样例，不代表实际授课结果。':'本阶段未配置此交叉维度，不据此推导进步。'}</p></div>`).join('')}</div>`}
 function custom(){const x=state.personal,q=x.preferences,p=x.plan;const status={pending:'待教师确认',confirmed:'教师已确认',returned:'已退回调整',draft:'偏好已修改 · 请重新生成'};return header('我的课程，按目标组合。','已有诊断起步，跳过已会内容；用阶段证据调整口语、听力、语法与写作的下一步。','私人路径 · 全部诊断/排课状态均为体验')+`<section class="hero"><div><div class="overline">ONE LEARNER · AN ADAPTABLE PATH</div><h2>按目标安排每一节，<br>按证据调整下一步。</h2><p>复用企业MG、ME生活口语、分级阅读与主题课程池。先确认学习目标，再由教师把关组合与节奏。</p></div><div class="actions"><button class="button white" data-action="import-diagnosis">${x.diagnosisImported?'已载入示例入学诊断':'载入已有入学诊断（模拟）'} ${icon('arrow')}</button></div></section><div class="notice neutral">路径目标用可观察任务表达。MG T级仅作为企业课程框架参考，当前未定级，不映射外部等级；10节不是保证达标或必须购买的课包。页面课程标题为方案示例，非官方课文或已完成排课。</div><div class="grid cols-even section-gap"><section class="panel"><div class="panel-title"><h3>01 · 可调整的10节基础路径</h3><span class="chip line">可跳过 · 不强制购10节</span></div>${x.diagnosisImported?`<p class="small muted">已载入一份示例既有诊断：完整表达需提示，部分结构待复核。建议先观察这些任务；已掌握项可以跳过，课次与顺序由教师确认。</p><div class="table-wrap section-gap"><table><thead><tr><th>序号与示例目标</th><th>状态</th></tr></thead><tbody>${foundation.map((r,i)=>`<tr><td style="white-space:normal"><b>${String(i+1).padStart(2,'0')} ${r[0]}</b><br><span class="muted">${r[1]} · ${r[2]}</span></td><td><button class="button tiny outline" data-action="skip-foundation" data-index="${i}">${x.skipped.includes(i)?'已跳过 · 恢复':'标为已掌握并跳过'}</button></td></tr>`).join('')}</tbody></table></div><p class="footnote">当前跳过${x.skipped.length}项，建议观察${10-x.skipped.length}项。跳过只是体验选择，不能替代教师判断；不对应扣课或购买。</p><button class="button primary section-gap" data-action="foundation-evidence">${x.foundationEvidenceReady?'重新查看示例阶段证据':'模拟完成阶段任务，查看证据'}</button>`:`<div class="empty">先载入已有诊断的示例样例，再看10节建议与可跳过项。</div>`}</section><section class="panel"><div class="panel-title"><h3>02 · 看任务证据，再选方向</h3><span class="chip amber">示例阶段记录 · 非实际测评</span></div>${x.foundationEvidenceReady?evidenceCards():`<div class="empty">模拟阶段任务后展示口语、语法、听力和写作的不同证据状态；不会生成综合分或假发音分。</div>`}<div class="divider"></div><h3>组合偏好</h3><div class="preference-grid section-gap"><label>主要需求<select id="prefNeed">${Object.entries(needNames).map(([v,t])=>`<option value="${v}" ${q.need===v?'selected':''}>${t}</option>`).join('')}</select></label><label>具体任务目标<select id="prefGoal">${goalOptions[q.need].map(([v,t])=>`<option value="${v}" ${q.goal===v?'selected':''}>${t}</option>`).join('')}</select></label><label>月预算偏好（元）<input id="prefBudget" type="number" value="${q.budget}" min="0" max="10000" step="50"></label><label>每周建议真人课次<select id="prefWeekly">${[1,2,3,4].map(v=>`<option value="${v}" ${q.weekly===v?'selected':''}>${v} 节 / 周</option>`).join('')}</select></label></div><p class="small muted section-gap">希望加入的交叉训练</p><div class="actions">${[['speaking','口语'],['listening','听力'],['grammar','语法'],['writing','写作'],['reading','分级阅读']].map(([v,t])=>`<label class="checkline"><input type="checkbox" id="cross-${v}" data-cross="${v}" ${q.cross.includes(v)?'checked':''}>${t}</label>`).join('')}</div><div class="notice neutral section-gap">预算是家长偏好，不是报价。沿用现有课包扣课规则；未知实际课价不估算，最终课程、权益和额外教研费用由教师与企业确认。49元/月成长服务独立，不自动加入定制课价。</div><button class="button primary section-gap" data-action="generate-plan" ${!x.foundationEvidenceReady?'disabled':''}>${p?'按当前偏好重新生成8节组合':'生成后续8节示例组合'} ${icon('arrow')}</button></section></div>${p?`<section class="panel section-gap"><div class="panel-title"><div><h3>03 · 我的8节课程组合 · V${p.version}</h3><p class="help">主需求：${needNames[p.preferences.need]} · 每周${p.preferences.weekly}节，约${Math.ceil(8/p.preferences.weekly)}周 · 月预算偏好¥${p.preferences.budget}（非课价）</p></div><span class="chip ${p.status==='confirmed'?'':'amber'}">${status[p.status]}</span></div><p class="small muted">规则驱动重组已有资源类别；不是自动生成正式教材。每节由真人教师决定材料与讲授，数字老师只补充已确认目标内的短练习。</p><div class="lesson-grid section-gap">${p.lessons.map((l,i)=>`<article class="plan-lesson"><div class="plan-number">${String(i+1).padStart(2,'0')}</div><h4>${esc(l.title)}</h4><span class="chip line">${esc(l.resource)}</span><p><b>目标：</b>${esc(l.goal)}</p><p><b>为什么推荐：</b>${esc(l.why)}</p><p><b>分工：</b>真人选材、讲授与复核；${l.writing?'写作工坊支持起草、规则检查和修订，教师复核为角色体验。':l.mia?'Mia承接这一项已实现的规则练习。':'数字老师的后续任务需教研配置，本体验版未实现本节完整教学。'}</p><p><b>检验任务：</b>${esc(l.check)}</p>${l.writing?`<button class="button tiny primary" data-writing="route" ${p.status!=='confirmed'?'disabled':''}>开始本节写作试练</button>`:''}${l.mia?`<button class="button tiny primary" data-action="plan-mia" ${p.status!=='confirmed'?'disabled':''}>开始Mia作息练习</button>`:''}</article>`).join('')}</div><div class="divider"></div><div class="actions">${p.status==='pending'?`<button class="button primary" data-action="confirm-plan">模拟教师确认本次组合</button><button class="button outline" data-action="return-plan">模拟教师退回调整</button>`:''}<button class="button outline" data-action="plan-review" ${p.status!=='confirmed'?'disabled':''}>模拟阶段复核，决定下一步</button></div><p class="footnote">${p.status==='returned'?esc(p.reason):'确认按钮为教师角色，不代表企业已接受课表。偏好修改后需重新生成并再次确认。'} 已保留${x.history.length}个历史组合版本；不会把一组课程承诺为固定等级结果。</p></section>`:''}${x.reviewed?`<section class="panel section-gap"><div class="panel-title"><h3>04 · 阶段复核后，路线可以转弯</h3><span class="chip amber">示例复核证据 · 非8节真实授课结果</span></div>${evidenceCards(true)}<p class="small muted section-gap">先解释任务证据与剩余困难，再决定继续主需求或转向。下面只调整下一组推荐，不自动购买、排课或保证达标。</p><div class="actions section-gap"><button class="button primary" data-next-need="${q.need}">继续${needNames[q.need]}</button>${Object.entries(needNames).filter(([v])=>v!==q.need).map(([v,t])=>`<button class="button outline" data-next-need="${v}">下一阶段转向${t}</button>`).join('')}</div></section>`:''}<p class="footnote">此区所有诊断导入、阶段完成、教师确认及排课状态均为示例体验。Mia的第三人称作息文字互动、浏览器朗读及写作工坊的起草、规则反馈和修订可实际操作；其他课次展示组合方案，未假装接入全部课程教学。</p>`}
 
-function teacher(){const p=state.practice,pr=prompts[Math.min(p.round,2)];return header('数字老师，接住课后这一问','围绕真人课的一个具体问题练习，把反馈留给教师复核。','AI生成数字形象 · Mia')+`<div class="teacher-layout"><aside class="teacher-profile"><div><div class="overline">YOUR PRACTICE COMPANION</div><h2>Hi, I’m Mia.</h2><p>一起把今天的表达，再练好一点。</p></div>${miaSVG()}<div><span class="chip white">课后练习助手</span><p style="margin-top:12px">今日主题<br><b style="color:#f1f5d9">Daily routines · 日常习惯</b></p></div><div class="profile-foot">Mia形象由AI生成，非真人外教克隆。朗读使用浏览器语音，本体验版未接实时视频与口型驱动。</div></aside><section class="session"><div class="session-top"><div><h3>${p.completed?'本次练习已完成':'Daily routines'}</h3><span class="small muted">${p.started?`第 ${Math.min(p.round+1,3)} / 3 轮 · 目标结构规则检查`:'学习授权待家长确认'}</span></div><div class="progress" aria-label="已完成${p.passed.length}轮，共3轮">${[0,1,2].map(i=>`<i class="${p.passed.includes(i)?'done':''}"></i>`).join('')}</div></div><div class="chatlog" id="chatlog" aria-live="polite">${p.started?p.messages.map(m=>`<div class="bubble ${m.role==='user'?'mine':m.kind==='needs_fix'?'feedback':m.kind==='correct'?'success':''}"><div class="avatar">${m.role==='user'?'YOU':'M'}</div><div class="text">${esc(m.text)}</div></div>`).join(''):`<div class="chat-empty"><div>${icon('shield')}<p>先由家长确认本次示例练习体验授权。</p><button class="button primary section-gap" data-learning="guardian">前往学习授权管理</button></div></div>`}</div><div class="composer">${p.completed?`<div class="review-badge">${icon('check')}<span>已完成3轮。反馈不是正式测评，下一步由教师复核。</span></div><button class="button primary section-gap" data-action="request-review">${state.review.status==='passed'?'查看经复核成长卡':'提交教师复核'} ${icon('arrow')}</button>`:`<label for="answerInput" class="sr-only">输入一句英语日常习惯句</label><textarea id="answerInput" rows="2" maxlength="250" placeholder="试着输入：He goes to school every day." ${!p.started?'disabled':''}>${esc(p.draft||'')}</textarea><div class="examples"><span class="small muted">试填示例：</span><button class="example" data-example="${esc(pr.wrong)}" ${!p.started?'disabled':''}>需要纠正的句子</button><button class="example" data-example="${esc(pr.example)}" ${!p.started?'disabled':''}>目标结构示例</button></div><div class="actions"><button class="button primary" data-action="send" ${!p.started?'disabled':''}>发送这句话 ${icon('arrow')}</button><button class="button outline" data-action="speak" ${!p.started?'disabled':''}>${icon('voice')} 听示范</button><button class="button outline" data-action="mic-toggle" ${!p.started?'disabled':''}>${icon('mic')} 语音输入</button></div>${state.showMic?`<div class="mic-panel"><b>可选语音输入 · 由你主动开启</b><p>仅在点击下方按钮后请求麦克风。浏览器识别服务可能把音频发往浏览器提供商；本页面不保存音频。浏览器不支持或离线时，请直接输入文字。</p><label class="checkline"><input id="micConsent" type="checkbox" ${state.micConsent?'checked':''}><span>我已了解识别方式，同意本次语音输入体验。</span></label><div class="actions"><button class="button tiny outline" data-action="mic-start" ${!state.micConsent?'disabled':''}>开始一次语音输入</button><button class="button tiny outline" data-action="mic-stop">停止</button><span id="micStatus" class="small muted"></span></div></div>`:''}<small>按 Ctrl / ⌘ + Enter 发送。只练目标句式；不会生成发音分数。请勿输入个人信息。</small>`}</div></section></div><div class="notice neutral section-gap">功能说明：文字练习采用目标教学规则与常见课堂交互：检查目标句式、提示动词变化、说明范围；支持问候/感谢、why-goes规则解释、help支架与bye暂停，这些交互不算答对或推进轮次。示范语音调用浏览器朗读；语音识别须浏览器支持。未接通用大模型、正式语音测评或真人教师。</div>`}
+function teacher(){const p=state.practice,pr=prompts[Math.min(p.round,2)];return header('数字老师，接住课后这一问','围绕真人课的一个具体问题练习，把反馈留给教师复核。','AI生成数字形象 · Mia')+`<div class="teacher-layout"><aside class="teacher-profile"><div><div class="overline">YOUR PRACTICE COMPANION</div><h2>Hi, I’m Mia.</h2><p>一起把今天的表达，再练好一点。</p></div>${miaSVG()}<div><span class="chip white">课后练习助手</span><p style="margin-top:12px">今日主题<br><b style="color:#f1f5d9">Daily routines · 日常习惯</b></p></div><div class="profile-foot">Mia形象由AI生成，非真人外教克隆。朗读使用浏览器语音，本体验版未接实时视频与口型驱动。</div></aside><section class="session"><div class="session-top"><div><h3>${p.completed?'本次练习已完成':'Daily routines'}</h3><span class="small muted">${p.started?`第 ${Math.min(p.round+1,3)} / 3 轮 · 目标结构规则检查`:'学习授权待家长确认'}</span></div><div class="progress" aria-label="已完成${p.passed.length}轮，共3轮">${[0,1,2].map(i=>`<i class="${p.passed.includes(i)?'done':''}"></i>`).join('')}</div></div><div class="chatlog" id="chatlog" aria-live="polite">${p.started?p.messages.map(m=>`<div class="bubble ${m.role==='user'?'mine':m.kind==='needs_fix'?'feedback':m.kind==='correct'?'success':''}"><div class="avatar">${m.role==='user'?'YOU':'M'}</div><div class="text">${esc(m.text)}</div></div>`).join(''):`<div class="chat-empty"><div>${icon('shield')}<p>先由家长确认本次示例练习体验授权。</p><button class="button primary section-gap" data-learning="guardian">前往学习授权管理</button></div></div>`}</div><div class="composer">${p.completed?`<div class="review-badge">${icon('check')}<span>本次 3 轮已完成。可以继续自由对话，或提交教师复核。</span></div><button class="button primary section-gap" data-action="request-review">${state.review.status==='passed'?'查看经复核成长卡':'提交教师复核'} ${icon('arrow')}</button>`:''}<label for="answerInput" class="sr-only">输入一句英语日常习惯句</label><textarea id="answerInput" rows="2" maxlength="250" placeholder="${p.started?(p.completed?'本次练习已完成，可以继续和 Mia 自由对话':'试着输入：He goes to school every day.'):'先完成家长授权并开始练习'}" ${!p.started?'disabled':''}>${esc(p.draft||'')}</textarea><div class="examples"><span class="small muted">试填示例：</span><button class="example" data-example="${esc(pr.wrong)}" ${!p.started?'disabled':''}>需要纠正的句子</button><button class="example" data-example="${esc(pr.example)}" ${!p.started?'disabled':''}>目标结构示例</button></div><div class="actions"><button class="button primary" data-action="send" ${!p.started?'disabled':''}>发送这句话 ${icon('arrow')}</button><button class="button outline" data-action="speak" ${!p.started?'disabled':''}>${icon('voice')} 听示范</button></div><small>按 Ctrl / ⌘ + Enter 发送；也可点输入区右侧的「🎤 按住说话」用语音输入。只练目标句式，不生成发音分数，请勿输入个人信息。</small></div></section></div><div class="notice neutral section-gap">功能说明：文字练习采用目标教学规则与常见课堂交互：检查目标句式、提示动词变化、说明范围；支持问候/感谢、why-goes规则解释、help支架与bye暂停，这些交互不算答对或推进轮次。示范语音调用浏览器朗读；语音输入可选接入讯飞语音听写；自由对话由大模型生成。未接入正式语音测评、发音分数或真人教师。</div>`}
 function currentEvidence(){const fixed=state.practice.attempts.find(a=>a.kind==='needs_fix'),correct=state.practice.attempts.find(a=>a.kind==='correct');return {fixed,correct}}
 function referralLink(){return location.href.split('#')[0]+'#parent?ref=B017'}
 function archive(){const p=state.practice,e=currentEvidence(),passed=state.review.status==='passed';return header('成长可解释，推荐有依据','先核对本次练习证据，再让家长自主选择匿名分享。')+`<div class="grid cols-even"><section class="panel"><div class="panel-title"><h3>本次成长卡</h3><span class="chip line">F-001 · 示例家庭</span></div><div class="archive-card"><div class="document-no">LEARNING RECEIPT / F001-001</div><h2>把日常习惯，说完整。</h2><p class="small muted" style="margin-top:6px">本次目标：一般现在时 · 第三人称单数</p><div class="archive-summary"><div><strong>${p.attempts.length}</strong><small>次文字尝试</small></div><div><strong>${p.passed.length}/3</strong><small>轮目标结构通过</small></div><div><strong>${p.attempts.filter(a=>a.kind==='needs_fix').length}</strong><small>次动词变化提示</small></div></div>${e.fixed?`<div class="evidence-row"><div class="caption">本机练习中的一次待修改表达</div><div class="sentence">${esc(e.fixed.text)}</div></div>`:''}${e.correct?`<div class="evidence-row"><div class="caption">本机练习中的一次目标结构表达</div><div class="sentence">${esc(e.correct.text)}</div></div>`:`<div class="empty">完成练习后，这里会出现本次文字记录。</div>`}<div class="evidence-row"><div class="caption">下一课观察建议</div><p class="small">${passed?'换一个人物和生活情境，由教师检查能否自主迁移；当前记录不能证明长期掌握。':'待教师核对练习内容后形成建议。'}</p></div>${reviewBadge()}<p class="footnote">无发音评分、无能力等级认证。本卡只记录本次目标句式练习；复核操作在本地模拟。</p></div></section><aside class="grid"><section class="panel"><div class="panel-title"><h3>教师复核工作台</h3><span class="chip amber">教师角色</span></div>${state.review.status==='pending'?`<p class="small muted">请查看左侧文本记录，逐项核对后通过；也可以退回补练。</p><label class="checkline"><input type="checkbox" id="reviewGrammar" ${state.review.grammar?'checked':''}><span>已核对目标句式与动词变化。</span></label><label class="checkline"><input type="checkbox" id="reviewContext" ${state.review.context?'checked':''}><span>已核对练习语境，未把规则反馈写成能力提升结论。</span></label><div class="actions section-gap"><button class="button primary" data-action="approve-review" ${!state.review.grammar||!state.review.context?'disabled':''}>通过本次复核（模拟）</button><button class="button outline" data-action="return-review">退回复练（模拟）</button></div>`:passed?`<div class="review-badge">${icon('shield')}<span>本次文本记录已通过体验复核</span></div><p class="footnote">正式上线由具备权限的真人教师操作并留审计记录。本体验版没有把规则引擎当作真人教师。</p>`:`<div class="empty">${p.completed?'练习已完成，等待提交教师复核。':'请先与Mia完成3轮目标结构练习。'}</div><button class="button primary section-gap" data-action="${p.completed?'request-review':'start'}" ${!p.completed&&!state.practiceConsent?'disabled':''}>${p.completed?'提交教师复核':'前往数字老师'}</button>`}</section><section class="panel"><div class="panel-title"><h3>匿名成长分享</h3>${icon('share')}</div><p class="small muted">把看得见的服务变成推荐入口。只含通用练习主题与示例，不含家庭身份、原始聊天或个人成绩。</p><label class="consent section-gap"><input id="shareConsent" type="checkbox" ${state.share.consent?'checked':''} ${!passed?'disabled':''}><span>我以家长角色，单独同意生成本次匿名分享体验卡。<small>此授权独立于练习授权；不会自动公开上传或发送给他人。</small></span></label><button class="button primary section-gap" data-action="create-share" ${!passed||!state.share.consent||state.share.generated?'disabled':''}>${state.share.generated?'匿名分享卡已生成':'生成匿名分享卡'}</button>${state.share.generated?`<div class="share-card"><div class="overline">A SMALL STEP, SHARED</div><h3>一次课后小练习，<br>一次看得见的服务。</h3><p>主题：用英语描述日常习惯<br>本次练习记录已由教师复核</p><div class="quote">He goes. She reads.</div><small>以上为通用示例句，非学员原始聊天。<br>仅为服务体验展示，不构成提分或能力认证。</small></div><div class="link-box">${esc(referralLink())}<br><span class="muted">本地体验链接 · 不会公开发布</span></div><div class="actions section-gap"><button class="button tiny outline" data-action="copy-link">复制本地邀请链接</button><button class="button tiny outline" data-action="referral-open" ${state.share.opened?'disabled':''}>${state.share.opened?'已模拟打开':'模拟推荐家庭打开'}</button><button class="button tiny primary" data-action="referral-lead" ${!state.share.opened||state.share.lead?'disabled':''}>${state.share.lead?'已生成推荐线索':'模拟留下咨询意向'}</button></div>`:''}<p class="footnote">${state.share.lead?'推荐来源已记入伙伴B-017；F-002可继续模拟预约、到课与基课首单。':'推荐触达与咨询分两步记录，同一家庭重复点击不重复计数。'}</p>${state.share.lead?trialActions():''}</section></aside></div>`}
@@ -252,6 +252,41 @@ const _miaOrig = {analyze, submitAnswer, render, speech};
 let _miaRate = 0.86;
 
 /* 朗读：中英混排时只读英文，避免卡顿 */
+/* Mia 是女老师：朗读优先选女声，明确避开男声
+   覆盖 Windows(Zira/Hazel/Aria/Jenny...)、Chrome(Google US English)、
+   iOS/macOS(Samantha/Karen/Moira...)、Android(English United States) */
+const _miaFemale = /zira|hazel|aria|jenny|michelle|ava|emma|sonia|libby|natasha|clara|samantha|karen|moira|tessa|victoria|serena|kate|allison|zoe|nicky|fiona|susan|martha|amelie|google us english|google uk english female|english united states|english united kingdom|female/i;
+const _miaMale = /\bdavid\b|\bmark\b|george|daniel|\balex\b|fred|\btom\b|\bguy\b|ryan|christopher|\beric\b|arthur|\bbrian\b|oliver|\bjames\b|\bpaul\b|richard|william|\bjohn\b|\bmale\b/i;
+let _miaVoiceCache = null;
+
+function pickMiaVoice(){
+  if(!('speechSynthesis' in window)) return null;
+  if(_miaVoiceCache) return _miaVoiceCache;
+  const all = (window.speechSynthesis.getVoices()||[]).filter(v=>/^en[-_]/i.test(v.lang||''));
+  if(!all.length) return null;
+  const score = v=>{
+    const n = v.name||'';
+    let s = 0;
+    if(_miaFemale.test(n)) s += 100;
+    if(_miaMale.test(n))   s -= 300;          /* 男声直接压到底 */
+    if(/^en[-_]us/i.test(v.lang)) s += 20;
+    else if(/^en[-_]gb/i.test(v.lang)) s += 12;
+    else s += 4;
+    if(v.localService) s += 6;
+    if(v.default) s += 2;
+    return s;
+  };
+  const best = all.slice().sort((a,b)=>score(b)-score(a))[0] || null;
+  _miaVoiceCache = best;
+  return best;
+}
+
+if('speechSynthesis' in window){
+  /* 语音列表异步就绪后重新挑一次 */
+  const refresh = ()=>{ _miaVoiceCache = null; pickMiaVoice(); };
+  try{ window.speechSynthesis.addEventListener('voiceschanged', refresh); }catch(e){}
+}
+
 function miaSpeak(text, rate){
   if(!('speechSynthesis' in window)) return false;
   window.speechSynthesis.cancel();
@@ -261,9 +296,8 @@ function miaSpeak(text, rate){
   if(!clean || !/[a-zA-Z]/.test(clean)) return false;
   const u = new SpeechSynthesisUtterance(clean);
   u.lang='en-US'; u.rate=rate||_miaRate; u.pitch=1;
-  const vs = window.speechSynthesis.getVoices()||[];
-  const en = vs.find(v=>/^en[-_]/i.test(v.lang)&&v.localService) || vs.find(v=>/^en[-_]/i.test(v.lang));
-  if(en) u.voice=en;
+  const en = pickMiaVoice();
+  if(en) u.voice = en;
   const vis = document.getElementById('miaVisual');
   u.onstart = ()=>{ vis && vis.classList.add('speaking'); };
   const stop = ()=>{ vis && vis.classList.remove('speaking'); };
@@ -511,6 +545,27 @@ submitAnswer = function(raw){
   if(!state.practice.started) return r;
 
   const speak = t => { if(state.practice.autoSpeak!==false && t) miaSpeak(t); };
+  // 3 轮完成后的自由对话：不进轮次统计，直接走大模型
+  if(r && r.kind==='completed'){
+    const txt = String(raw==null?'':raw).trim();
+    if(!txt) return r;
+    const box = state.practice.messages;
+    state.practice.draft='';
+    const el0=document.getElementById('answerInput');
+    if(el0) el0.value='';
+    box.push({role:'user', text: txt.slice(0,250)});
+    const at = box.length;
+    box.push({role:'mia', text:'Mia 正在想…', typing:true});
+    commit(); miaScrollBottom();
+    miaAskServer().then(reply=>{
+      box[at] = {role:'mia', text:String(reply), llm:true};
+      commit(); miaScrollBottom(); speak(reply);
+    }).catch(()=>{
+      box[at] = {role:'mia', text:'这次没有接到回复，可以再发一次。'};
+      commit(); miaScrollBottom();
+    });
+    return r;
+  }
 
   // 判分 / 拦截 / 已完成 / 空输入 → 完全不干预
   if(!r || r.kind==='correct' || r.kind==='blocked' || r.kind==='completed' || r.kind==='empty'){
@@ -556,7 +611,7 @@ function miaMicUI(state2){
   const btn = document.getElementById('miaMicBtn');
   if(!btn) return;
   btn.classList.toggle('rec', !!state2);
-  btn.textContent = state2 ? '■ 停止' : '🎤 说话';
+  btn.textContent = state2 ? '■ 停止录音' : '🎤 按住说话';
 }
 
 function miaPcmToB64(int16){
@@ -647,20 +702,22 @@ function miaFinishRec(){
   }).catch(()=>tell('语音识别失败，先用文字聊吧。'));
 }
 
-/* 注入麦克风按钮 */
+/* 注入麦克风按钮：唯一语音入口，固定在输入区工具栏右侧 */
 function miaPatchMic(){
   if(state.tab!=='teacher') return;
-  const box = document.querySelector('.mia-extra');
-  if(!box || box.querySelector('#miaMicBtn')) return;
-  const dis = state.practice.started ? '' : 'disabled';
-  const btn = document.createElement('button');
-  btn.id = 'miaMicBtn';
-  btn.className = 'mia-chip mia-mic';
-  btn.disabled = !state.practice.started;
-  btn.textContent = '🎤 说话';
-  btn.addEventListener('click', ()=>{ _recOn ? miaFinishRec() : miaStartRec(); });
-  const rows = box.querySelector('.mia-rows');
-  (rows || box).appendChild(btn);
+  const acts = document.querySelector('.composer .actions');
+  if(!acts) return;
+  let btn = document.getElementById('miaMicBtn');
+  if(!btn){
+    btn = document.createElement('button');
+    btn.id = 'miaMicBtn';
+    btn.className = 'button mic-main';
+    btn.addEventListener('click', ()=>{ _recOn ? miaFinishRec() : miaStartRec(); });
+    acts.appendChild(btn);
+  }
+  btn.disabled = !state.practice.started && !_recOn;
+  btn.classList.toggle('rec', _recOn);
+  btn.textContent = _recOn ? '■ 停止录音' : '🎤 按住说话';
 }
 
 const _miaV1Render = render;   /* v1 的 render（内含 miaPatchUI） */
@@ -675,7 +732,7 @@ miaPatchMic();
 if(!document.getElementById('miaMicStyle')){
   const st = document.createElement('style');
   st.id = 'miaMicStyle';
-  st.textContent = '.mia-mic.rec{background:#e11d48!important;color:#fff!important;border-color:#e11d48!important}';
+  st.textContent = '.mic-main{margin-left:10px;background:#0f766e!important;color:#fff!important;border:1px solid #0f766e!important;font-weight:600!important;min-width:136px;white-space:nowrap}.mic-main:hover{background:#0d5f59!important}.mic-main.rec{background:#e11d48!important;border-color:#e11d48!important;animation:micPulse 1.2s infinite}@keyframes micPulse{0%,100%{opacity:1}50%{opacity:.6}}@media(max-width:560px){.composer .actions{display:flex;flex-wrap:wrap;gap:8px}.composer .actions .mic-main{margin-left:0;flex:1 1 100%;order:3}}';
   document.head.appendChild(st);
 }
 
