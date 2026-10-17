@@ -574,6 +574,22 @@ function miaStopRec(){
   miaMicUI(false);
 }
 
+/* 有些设备（iOS Safari / 部分安卓）忽略 sampleRate:16000，这里线性插值兜底 */
+function miaResample16k(input, inRate){
+  if(!inRate || inRate === 16000) return input;
+  const ratio = inRate / 16000;
+  const n = Math.floor(input.length / ratio);
+  const out = new Float32Array(n);
+  for(let i=0;i<n;i++){
+    const pos = i * ratio;
+    const i0 = pos | 0;
+    const i1 = i0 + 1 < input.length ? i0 + 1 : i0;
+    const t = pos - i0;
+    out[i] = input[i0]*(1-t) + input[i1]*t;
+  }
+  return out;
+}
+
 function miaStartRec(){
   if(_recOn) return;
   if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
@@ -590,9 +606,10 @@ function miaStartRec(){
         const node = _recCtx.createScriptProcessor(4096, 1, 1);
         node.onaudioprocess = ev=>{
           const f = ev.inputBuffer.getChannelData(0);
-          const i16 = new Int16Array(f.length);
-          for(let i=0;i<f.length;i++){
-            let v = Math.max(-1, Math.min(1, f[i]));
+          const rs = miaResample16k(f, _recCtx.sampleRate);
+          const i16 = new Int16Array(rs.length);
+          for(let i=0;i<rs.length;i++){
+            let v = Math.max(-1, Math.min(1, rs[i]));
             i16[i] = v < 0 ? v*0x8000 : v*0x7FFF;
           }
           _recChunks.push(i16);
