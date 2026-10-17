@@ -287,23 +287,91 @@ if('speechSynthesis' in window){
   try{ window.speechSynthesis.addEventListener('voiceschanged', refresh); }catch(e){}
 }
 
-function miaSpeak(text, rate){
+/* ===== 朗读：浏览器语音优先，微信/移动端自动切云端语音 ===== */
+const _isWeChat = /MicroMessenger/i.test(navigator.userAgent);
+let _miaSpokeStarted = false, _miaSpeakTimer = null;
+let _miaAudioEl = null, _miaAudioUrl = null, _miaAudioUnlocked = false;
+
+/* 移动端音频解锁：首次触摸时播一段 0 长度 WAV，之后才允许程序化播放 */
+function miaUnlockAudio(){
+  if(_miaAudioUnlocked) return;
+  _miaAudioUnlocked = true;
+  try{
+    if(!_miaAudioEl) _miaAudioEl = new Audio();
+    _miaAudioEl.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=';
+    const pr = _miaAudioEl.play();
+    if(pr && pr.catch) pr.catch(function(){});
+  }catch(e){}
+}
+
+/* 浏览器语音（桌面端可用，微信内置浏览器多数不出声） */
+function _miaBrowserSpeak(text, rate){
   if(!('speechSynthesis' in window)) return false;
-  window.speechSynthesis.cancel();
-  let clean = String(text==null?'':text)
+  try{ window.speechSynthesis.cancel(); }catch(e){}
+  const clean = String(text==null?'':text)
     .replace(/[\u4e00-\u9fa5\u3000-\u303f\uff00-\uffef]+/g,' ')
-    .replace(/[“”’]/g,"'").replace(/\n+/g,'. ').replace(/\s+/g,' ').trim();
+    .replace(/[\u201c\u201d\u2019]/g,"'").replace(/\n+/g,'. ').replace(/\s+/g,' ').trim();
   if(!clean || !/[a-zA-Z]/.test(clean)) return false;
   const u = new SpeechSynthesisUtterance(clean);
   u.lang='en-US'; u.rate=rate||_miaRate; u.pitch=1;
   const en = pickMiaVoice();
   if(en) u.voice = en;
   const vis = document.getElementById('miaVisual');
-  u.onstart = ()=>{ vis && vis.classList.add('speaking'); };
-  const stop = ()=>{ vis && vis.classList.remove('speaking'); };
+  _miaSpokeStarted = false;
+  u.onstart = function(){ _miaSpokeStarted = true; if(vis) vis.classList.add('speaking'); };
+  const stop = function(){ if(vis) vis.classList.remove('speaking'); };
   u.onend = stop; u.onerror = stop;
   try{ window.speechSynthesis.speak(u); return true; }catch(e){ return false; }
 }
+
+/* 云端语音（讯飞合成，中英自动选女声） */
+function miaServerSpeak(text){
+  const vis = document.getElementById('miaVisual');
+  const body = String(text==null?'':text).slice(0,300);
+  if(!body.trim()) return;
+  fetch(MIA_TTS, {method:'POST', headers:{'Content-Type':'application/json'},
+                  body: JSON.stringify({text: body})})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if(!d || !d.audio) throw new Error('no audio');
+      const bin = atob(d.audio);
+      const arr = new Uint8Array(bin.length);
+      for(let i=0;i<bin.length;i++) arr[i] = bin.charCodeAt(i);
+      if(_miaAudioUrl){ try{ URL.revokeObjectURL(_miaAudioUrl); }catch(e){} }
+      _miaAudioUrl = URL.createObjectURL(new Blob([arr], {type:'audio/mpeg'}));
+      if(!_miaAudioEl){ _miaAudioEl = new Audio(); }
+      _miaAudioEl.onplay  = function(){ if(vis) vis.classList.add('speaking'); };
+      _miaAudioEl.onended = function(){ if(vis) vis.classList.remove('speaking'); };
+      _miaAudioEl.pause();
+      _miaAudioEl.src = _miaAudioUrl;
+      const pr = _miaAudioEl.play();
+      if(pr && pr.catch) pr.catch(function(){ if(vis) vis.classList.remove('speaking'); });
+    })
+    .catch(function(){ /* 静默失败，不影响文字对话 */ });
+}
+
+/* 统一入口 */
+function miaSpeak(text, rate){
+  const raw = String(text==null?'':text);
+  if(!raw.trim()) return false;
+  clearTimeout(_miaSpeakTimer);
+  /* 微信内置浏览器 / 无语音引擎 → 直接走云端 */
+  if(_isWeChat || !('speechSynthesis' in window)){
+    miaServerSpeak(raw);
+    return true;
+  }
+  const tried = _miaBrowserSpeak(raw, rate);
+  if(!tried){ miaServerSpeak(raw); return true; }
+  /* 900ms 内没有真正开始发声（被静音/被拦截）→ 换云端 */
+  _miaSpeakTimer = setTimeout(function(){
+    if(!_miaSpokeStarted){
+      try{ window.speechSynthesis.cancel(); }catch(e){}
+      miaServerSpeak(raw);
+    }
+  }, 900);
+  return true;
+}
+
 function miaCurrentPrompt(){ return prompts[Math.min(state.practice.round,2)]; }
 function miaName(){
   const n = state.practice.studentName || state.practice.miaName;
@@ -443,7 +511,7 @@ function miaPatchUI(){
       `<button class="mia-chip" data-mia="ask" data-value="Why he goes?" ${dis}>为什么加 s</button>` +
       `<button class="mia-chip" data-mia="listen" ${dis}>听 Mia 读</button>` +
     '</div>' +
-    `<div class="mia-opt"><input type="checkbox" id="miaAutoSpeak" ${on?'checked':''}><label for="miaAutoSpeak">Mia 说话时自动朗读（使用浏览器语音）</label></div>` +
+    `<div class="mia-opt"><input type="checkbox" id="miaAutoSpeak" ${on?'checked':''}><label for="miaAutoSpeak">Mia 说话时自动朗读</label></div>` +
     (p.started ? `<div class="mia-hint">当前任务：${esc(miaCurrentPrompt().ask)}</div>`
                : `<div class="mia-hint">先完成家长授权并开始练习，「和 Mia 说一句」就可以用了。</div>`);
   comp.insertBefore(box, comp.firstChild);
@@ -501,6 +569,7 @@ document.addEventListener('change', e=>{
 /* ================= Mia 真对话 v2（DeepSeek 接入 · 规则兜底） ================= */
 const MIA_API = 'https://qindou-mia-api-v2.netlify.app/api/mia';
 const MIA_ASR = 'https://qindou-mia-api-v2.netlify.app/api/asr';
+const MIA_TTS = 'https://qindou-mia-api-v2.netlify.app/api/tts';
 let _asrReady = null;
 
 function miaTaskText(){
@@ -712,7 +781,7 @@ function miaPatchMic(){
     btn = document.createElement('button');
     btn.id = 'miaMicBtn';
     btn.className = 'button mic-main';
-    btn.addEventListener('click', ()=>{ _recOn ? miaFinishRec() : miaStartRec(); });
+    btn.addEventListener('click', ()=>{ miaUnlockAudio(); _recOn ? miaFinishRec() : miaStartRec(); });
     acts.appendChild(btn);
   }
   btn.disabled = !state.practice.started && !_recOn;
@@ -736,6 +805,8 @@ if(!document.getElementById('miaMicStyle')){
   document.head.appendChild(st);
 }
 
+document.addEventListener('touchstart', miaUnlockAudio, {once:true, passive:true});
+document.addEventListener('click', miaUnlockAudio, {once:true});
 window.__miaLLM = {miaAskServer, miaHistory, miaStartRec, miaFinishRec, MIA_API, MIA_ASR};
 
 
