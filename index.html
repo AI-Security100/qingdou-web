@@ -464,6 +464,204 @@ document.addEventListener('change', e=>{
   }
 });
 
+/* ================= Mia 真对话 v2（DeepSeek 接入 · 规则兜底） ================= */
+const MIA_API = 'https://qindou-mia-api-v2.netlify.app/api/mia';
+const MIA_ASR = 'https://qindou-mia-api-v2.netlify.app/api/asr';
+let _asrReady = null;
+
+function miaTaskText(){
+  try{ const p = miaCurrentPrompt(); return (p.ask||'') + ' 例句：' + (p.example||''); }
+  catch(e){ return 'daily routine 日常作息'; }
+}
+
+/* 取最近 10 条真实对话（排除“正在想”占位） */
+function miaHistory(){
+  return (state.practice.messages||[])
+    .filter(m=>m && (m.role==='user'||m.role==='mia') && m.text && !m.typing)
+    .slice(-10)
+    .map(m=>({role: m.role==='user'?'student':'mia', text:String(m.text).slice(0,400)}));
+}
+
+function miaScrollBottom(){
+  requestAnimationFrame(()=>{
+    const c = document.getElementById('chatlog'); if(c) c.scrollTop = c.scrollHeight;
+    const i = document.getElementById('answerInput'); if(i) i.focus();
+  });
+}
+
+function miaAskServer(){
+  const ctl = new AbortController();
+  const timer = setTimeout(()=>ctl.abort(), 11000);
+  return fetch(MIA_API, {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({messages: miaHistory(), task: miaTaskText()}),
+    signal: ctl.signal
+  }).then(r=>r.json()).then(d=>{
+    clearTimeout(timer);
+    if(d && d.reply) return String(d.reply);
+    throw new Error((d && d.error) || 'empty');
+  }).catch(e=>{ clearTimeout(timer); throw e; });
+}
+
+/* 覆写 submitAnswer：答对判分/轮次仍走原逻辑；闲聊与自由输入交给大模型 */
+submitAnswer = function(raw){
+  const before = state.practice.messages ? state.practice.messages.length : 0;
+  const r = _miaOrig.submitAnswer(raw);
+  if(!state.practice.started) return r;
+
+  const speak = t => { if(state.practice.autoSpeak!==false && t) miaSpeak(t); };
+
+  // 判分 / 拦截 / 已完成 / 空输入 → 完全不干预
+  if(!r || r.kind==='correct' || r.kind==='blocked' || r.kind==='completed' || r.kind==='empty'){
+    if(r && r.kind==='correct'){
+      const m = state.practice.messages[state.practice.messages.length-1];
+      if(m && m.role==='mia') speak(m.text);
+    }
+    return r;
+  }
+
+  // classroom / off_topic → 用大模型改写这条回复
+  const msgs = state.practice.messages;
+  if(!msgs || msgs.length<=before) return r;
+  const idx = msgs.length-1;
+  const prev = msgs[idx];
+  if(!prev || prev.role!=='mia') return r;
+
+  const fallback = prev.text;
+  msgs[idx] = {role:'mia', text:'Mia 正在想…', typing:true};
+  commit(); miaScrollBottom();
+
+  miaAskServer().then(reply=>{
+    msgs[idx] = {role:'mia', text:String(reply), llm:true};
+    commit(); miaScrollBottom(); speak(reply);
+  }).catch(()=>{
+    msgs[idx] = {role:'mia', text:fallback};
+    commit(); miaScrollBottom(); speak(fallback);
+  });
+  return r;
+};
+
+/* ---------- 语音输入：16k 单声道 PCM → /api/asr ---------- */
+let _recCtx=null, _recStream=null, _recNode=null, _recChunks=[], _recOn=false, _recStartAt=0;
+
+function miaAsrReady(cb){
+  if(_asrReady!==null){ cb(_asrReady); return; }
+  fetch(MIA_ASR, {method:'GET'}).then(r=>r.json()).then(d=>{
+    _asrReady = !!(d && d.configured); cb(_asrReady);
+  }).catch(()=>{ _asrReady=false; cb(false); });
+}
+
+function miaMicUI(state2){
+  const btn = document.getElementById('miaMicBtn');
+  if(!btn) return;
+  btn.classList.toggle('rec', !!state2);
+  btn.textContent = state2 ? '■ 停止' : '🎤 说话';
+}
+
+function miaPcmToB64(int16){
+  let bin=''; const u8 = new Uint8Array(int16.buffer);
+  const CH = 0x8000;
+  for(let i=0;i<u8.length;i+=CH){ bin += String.fromCharCode.apply(null, u8.subarray(i, i+CH)); }
+  return btoa(bin);
+}
+
+function miaStopRec(){
+  _recOn = false;
+  try{ _recNode && _recNode.disconnect(); }catch(e){}
+  try{ _recStream && _recStream.getTracks().forEach(t=>t.stop()); }catch(e){}
+  _recNode=null; _recStream=null;
+  miaMicUI(false);
+}
+
+function miaStartRec(){
+  if(_recOn) return;
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+    tell('当前环境不支持麦克风，请用 https 网址在手机浏览器打开。'); return;
+  }
+  miaAsrReady(ok=>{
+    if(!ok){ tell('语音识别服务尚未配置完成，先用文字和 Mia 聊吧。'); return; }
+    navigator.mediaDevices.getUserMedia({audio:{channelCount:1, echoCancellation:true, noiseSuppression:true}})
+      .then(stream=>{
+        _recStream = stream; _recChunks = []; _recStartAt = Date.now();
+        const AC = window.AudioContext || window.webkitAudioContext;
+        _recCtx = new AC({sampleRate:16000});
+        const src = _recCtx.createMediaStreamSource(stream);
+        const node = _recCtx.createScriptProcessor(4096, 1, 1);
+        node.onaudioprocess = ev=>{
+          const f = ev.inputBuffer.getChannelData(0);
+          const i16 = new Int16Array(f.length);
+          for(let i=0;i<f.length;i++){
+            let v = Math.max(-1, Math.min(1, f[i]));
+            i16[i] = v < 0 ? v*0x8000 : v*0x7FFF;
+          }
+          _recChunks.push(i16);
+        };
+        src.connect(node); node.connect(_recCtx.destination);
+        _recNode = node; _recOn = true; miaMicUI(true);
+        tell('请说话，说完点「停止」。');
+      })
+      .catch(()=>tell('麦克风权限被拒绝，请在浏览器设置里允许。'));
+  });
+}
+
+function miaFinishRec(){
+  if(!_recOn) return;
+  const secs = (Date.now()-_recStartAt)/1000;
+  miaStopRec();
+  if(secs < 0.5){ tell('录音太短，再说一次吧。'); return; }
+  let total = 0; _recChunks.forEach(c=>total += c.length);
+  const all = new Int16Array(total); let off = 0;
+  _recChunks.forEach(c=>{ all.set(c, off); off += c.length; });
+  if(total < 16000*0.4){ tell('录音太短，再说一次吧。'); return; }
+  const b64 = miaPcmToB64(all);
+  tell('正在识别…');
+  fetch(MIA_ASR, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({pcm:b64})
+  }).then(r=>r.json()).then(d=>{
+    if(d && d.text){
+      const inp = document.getElementById('answerInput');
+      if(inp){ inp.value = d.text; state.practice.draft = d.text; }
+      submitAnswer(d.text);
+    }else{
+      tell('没听清，再说一次？');
+    }
+  }).catch(()=>tell('语音识别失败，先用文字聊吧。'));
+}
+
+/* 注入麦克风按钮 */
+function miaPatchMic(){
+  if(state.tab!=='teacher') return;
+  const box = document.querySelector('.mia-extra');
+  if(!box || box.querySelector('#miaMicBtn')) return;
+  const dis = state.practice.started ? '' : 'disabled';
+  const btn = document.createElement('button');
+  btn.id = 'miaMicBtn';
+  btn.className = 'mia-chip mia-mic';
+  btn.disabled = !state.practice.started;
+  btn.textContent = '🎤 说话';
+  btn.addEventListener('click', ()=>{ _recOn ? miaFinishRec() : miaStartRec(); });
+  const rows = box.querySelector('.mia-rows');
+  (rows || box).appendChild(btn);
+}
+
+render = function(){
+  const r = _miaOrig.render.apply(null, arguments);
+  try{ miaPatchMic(); }catch(e){}
+  return r;
+};
+
+if(!document.getElementById('miaMicStyle')){
+  const st = document.createElement('style');
+  st.id = 'miaMicStyle';
+  st.textContent = '.mia-mic.rec{background:#e11d48!important;color:#fff!important;border-color:#e11d48!important}';
+  document.head.appendChild(st);
+}
+
+window.__miaLLM = {miaAskServer, miaHistory, miaStartRec, miaFinishRec, MIA_API, MIA_ASR};
+
+
 /* 初始化 */
 if(state.practice.autoSpeak===undefined) state.practice.autoSpeak = true;
 miaPatchUI();
